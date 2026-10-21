@@ -7,6 +7,7 @@ macOS 菜单栏小工具：久坐提醒起身活动、定时提醒喝水。原�
 ```bash
 ./build.sh            # 构建到 build/WorkHealth.app
 ./build.sh install    # 构建并安装到 ~/Applications，然后启动
+./build.sh dmg        # 构建并生成安装包 build/WorkHealth-<版本>.dmg
 ```
 
 需要 macOS 13+ 和 Xcode Command Line Tools（`xcode-select --install`）。
@@ -21,8 +22,16 @@ macOS 菜单栏小工具：久坐提醒起身活动、定时提醒喝水。原�
 
 开机自动启动通过 `~/Library/LaunchAgents/com.workhealth.healthreminder.plist` 实现，记录的是当前 App 路径；移动 App 后需重新勾选一次。
 
+## 下载安装
+
+到 [Releases](https://github.com/vincentail/work_health/releases) 下载最新的 `WorkHealth-x.y.z.dmg`，打开后把 WorkHealth 拖到「应用程序」即可。通用二进制，支持 Apple 芯片和 Intel。
+
+App 未经 Apple 公证，首次打开会被 Gatekeeper 拦截：右键 App 选择「打开」，或执行 `xattr -cr /Applications/WorkHealth.app`。
+
 ## 自动构建
 
-推送到 `main` 或提 PR 时，GitHub Actions 会自动构建，产物 `WorkHealth.zip` 可在 Actions 运行页面下载。推送 `v*` 标签（如 `git tag v1.0 && git push origin v1.0`）会自动创建 Release 并附带安装包。
+GitHub Actions（`.github/workflows/build.yml`）：
 
-未签名公证的 App 首次打开会被 Gatekeeper 拦截，解压后执行 `xattr -cr WorkHealth.app` 或右键「打开」即可。
+- 推送到 `main`：自动构建并发布 Release，版本号 `1.0.<构建序号>`
+- 推送 `v*` 标签（如 `git tag v1.2.0 && git push origin v1.2.0`）：以标签为版本号发布 Release
+- Pull Request：只构建，不发布，产物可在 Actions 运行页面下载
