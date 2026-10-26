@@ -5,7 +5,7 @@ import AVFoundation
 
 let W: CGFloat = 1920, H: CGFloat = 1080
 let fps: Int32 = 30
-let duration = 34.0
+let duration = 41.0
 var ctx: CGContext!
 
 // MARK: - 动画工具
@@ -173,13 +173,13 @@ func desktop(statusSymbol: String, statusText: String, pulse: Double) {
 }
 
 func promptWindow(emoji: String, title: String, message: String, buttons: [String],
-                  appear: Double, vanish: Double = 0, pressed: Bool = false) {
-    let c = CGPoint(x: desk.midX, y: desk.midY + 10)
+                  appear: Double, vanish: Double = 0, pressed: Bool = false, windows: Bool = false) {
+    let c = CGPoint(x: desk.midX, y: desk.midY + (windows ? -14 : 10))
     withAlpha(ease(appear * 1.6) * (1 - ease(vanish))) {
         scaled(0.85 + 0.15 * easeOutBack(appear), at: c) {
             let w: CGFloat = 660, h: CGFloat = 420
             let r = CGRect(x: c.x - w / 2, y: c.y - h / 2, width: w, height: h)
-            roundRect(r, 30, fill: rgb(0xf8fafc), shadow: true)
+            roundRect(r, windows ? 12 : 30, fill: rgb(0xf8fafc), shadow: true)
             label(emoji, 78, at: CGPoint(x: c.x, y: r.minY + 82))
             label(title, 36, .bold, dark, at: CGPoint(x: c.x, y: r.minY + 172))
             para(message, 23, gray, center: CGPoint(x: c.x, y: r.minY + 248), width: 580)
@@ -190,13 +190,112 @@ func promptWindow(emoji: String, title: String, message: String, buttons: [Strin
                 let br = CGRect(x: bx, y: r.maxY - 92, width: widths[i], height: 56)
                 let primary = i == 0
                 scaled(primary && pressed ? 0.94 : 1, at: CGPoint(x: br.midX, y: br.midY)) {
-                    roundRect(br, 13, fill: primary ? (pressed ? rgb(0x1d4ed8) : blue) : rgb(0xe2e8f0))
+                    let main = windows ? rgb(0x0067c0) : blue
+                    roundRect(br, windows ? 6 : 13, fill: primary ? (pressed ? rgb(0x1d4ed8) : main) : rgb(0xe2e8f0))
                     label(title, 22, .medium, primary ? .white : dark, at: CGPoint(x: br.midX, y: br.midY))
                 }
                 bx += widths[i] + 16
             }
         }
     }
+}
+
+func windowsLogo(at p: CGPoint, size: CGFloat, color: NSColor) {
+    let g = size * 0.08, s = (size - g) / 2
+    ctx.setFillColor(color.cgColor)
+    for i in 0..<2 {
+        for j in 0..<2 {
+            ctx.fill(CGRect(x: p.x - size / 2 + CGFloat(i) * (s + g), y: p.y - size / 2 + CGFloat(j) * (s + g),
+                            width: s, height: s))
+        }
+    }
+}
+
+/// 平台标签（画面顶部）
+func platformPill(_ text: String, windows: Bool) {
+    let w = attr(text, 24, .semibold, .white).size().width + 76
+    let r = CGRect(x: 960 - w / 2, y: 22, width: w, height: 48)
+    roundRect(r, 24, fill: NSColor.white.withAlphaComponent(0.14))
+    let icon = CGPoint(x: r.minX + 32, y: r.midY)
+    if windows { windowsLogo(at: icon, size: 20, color: .white) }
+    else { symbol("apple.logo", size: 21, color: .white, at: icon) }
+    label(text, 24, .semibold, at: CGPoint(x: r.minX + 54, y: r.midY), align: .left)
+}
+
+/// Windows 11 风格桌面，返回托盘图标位置
+@discardableResult
+func windowsDesktop(trayText: String, trayColor: NSColor, pulse: Double) -> CGRect {
+    roundRect(desk, 18, fill: .black, shadow: true)
+    gradient([rgb(0x0b2e6b), rgb(0x1565c0), rgb(0x7cc4fa)], in: desk, clip: roundedPath(desk, 18))
+
+    let bar = CGRect(x: desk.minX, y: desk.maxY - 58, width: desk.width, height: 58)
+    ctx.saveGState()
+    ctx.addPath(roundedPath(desk, 18)); ctx.clip()
+    ctx.setFillColor(rgb(0xf3f3f3, 0.94).cgColor)
+    ctx.fill(bar)
+    ctx.restoreGState()
+    let y = bar.midY
+
+    // 居中的开始按钮、搜索框和应用
+    var x = desk.midX - 190
+    windowsLogo(at: CGPoint(x: x, y: y), size: 24, color: rgb(0x0078d4))
+    x += 30
+    let search = CGRect(x: x, y: y - 18, width: 170, height: 36)
+    roundRect(search, 18, fill: .white)
+    symbol("magnifyingglass", size: 15, color: gray, at: CGPoint(x: search.minX + 22, y: y))
+    label("搜索", 17, .regular, gray, at: CGPoint(x: search.minX + 42, y: y), align: .left)
+    x = search.maxX + 36
+    for (name, color) in [("folder.fill", rgb(0xf4b400)), ("globe", rgb(0x0f9d58)), ("envelope.fill", rgb(0x0078d4))] {
+        symbol(name, size: 24, color: color, at: CGPoint(x: x, y: y))
+        x += 56
+    }
+
+    // 右侧：时间、音量、网络、托盘图标
+    var r = desk.maxX - 24
+    label("10:30", 16, .regular, dark, at: CGPoint(x: r, y: y - 11), align: .right)
+    r -= label("2026/10/26", 16, .regular, dark, at: CGPoint(x: r, y: y + 11), align: .right).width + 22
+    r -= symbol("speaker.wave.2.fill", size: 17, color: dark, at: CGPoint(x: r, y: y), align: .right).width + 14
+    r -= symbol("wifi", size: 17, color: dark, at: CGPoint(x: r, y: y), align: .right).width + 22
+    let icon = CGRect(x: r - 30, y: y - 15, width: 30, height: 30)
+    roundRect(icon.insetBy(dx: -7, dy: -7), 6, fill: rgb(0x000000, 0.05 + 0.15 * pulse))
+    roundRect(icon, 7, fill: trayColor)
+    label(trayText, trayText.count >= 3 ? 13 : 17, .bold, .white, at: CGPoint(x: icon.midX, y: icon.midY))
+    symbol("chevron.up", size: 14, color: dark, at: CGPoint(x: icon.minX - 22, y: y), align: .right)
+    return icon
+}
+
+/// Windows 托盘右键菜单，返回「设置」一行的位置
+@discardableResult
+func windowsMenu(_ items: [String], right: CGFloat, top: CGFloat? = nil, bottom: CGFloat = 0, width: CGFloat,
+                 infoRows: Int = 0, hover: String?, appear: Double) -> CGRect {
+    let rowH: CGFloat = 40, sepH: CGFloat = 13
+    let height = items.reduce(16) { $0 + ($1 == "-" ? sepH : rowH) }
+    let r = CGRect(x: right - width, y: top ?? bottom - height, width: width, height: height)
+    var hovered = CGRect.zero
+    withAlpha(ease(appear * 1.5)) {
+        ctx.saveGState()
+        ctx.translateBy(x: 0, y: CGFloat(1 - ease(appear)) * 16)
+        roundRect(r, 10, fill: rgb(0xf9f9f9), shadow: true)
+        var y = r.minY + 8
+        for (i, item) in items.enumerated() {
+            if item == "-" {
+                ctx.setFillColor(rgb(0xe2e8f0).cgColor)
+                ctx.fill(CGRect(x: r.minX + 12, y: y + sepH / 2, width: width - 24, height: 1))
+                y += sepH
+                continue
+            }
+            let row = CGRect(x: r.minX + 6, y: y, width: width - 12, height: rowH)
+            if item == hover { roundRect(row, 6, fill: rgb(0x0f172a, 0.07)); hovered = row }
+            let isInfo = i < infoRows
+            let hasSub = item.hasSuffix("›")
+            let text = hasSub ? String(item.dropLast()).trimmingCharacters(in: .whitespaces) : item
+            label(text, 19, .regular, isInfo ? gray : dark, at: CGPoint(x: row.minX + 16, y: row.midY), align: .left)
+            if hasSub { label("›", 22, .regular, gray, at: CGPoint(x: row.maxX - 16, y: row.midY - 2), align: .right) }
+            y += rowH
+        }
+        ctx.restoreGState()
+    }
+    return hovered
 }
 
 func cups(filled: Int, fillingProgress: Double, alpha: Double) {
@@ -238,7 +337,7 @@ func intro(_ u: Double) {
     }
     slideIn(prog(u, 0.7, 1.3)) { d in label("WorkHealth", 128, .heavy, at: CGPoint(x: 960, y: 610 + d)) }
     slideIn(prog(u, 1.1, 1.7)) { d in
-        label("久坐提醒 · 喝水提醒 · macOS 菜单栏小工具", 46, .medium, rgb(0xcbd5e1), at: CGPoint(x: 960, y: 740 + d))
+        label("久坐提醒 · 喝水提醒 · 支持 macOS 与 Windows", 46, .medium, rgb(0xcbd5e1), at: CGPoint(x: 960, y: 740 + d))
     }
 }
 
@@ -272,6 +371,7 @@ func demo(_ u: Double) {
         pulse = 0
     }
     desktop(statusSymbol: symbolName, statusText: statusText, pulse: pulse)
+    platformPill("macOS", windows: false)
 
     if u < 5.5 {
         promptWindow(emoji: "🧍", title: "已经坐了 45 分钟啦",
@@ -300,6 +400,38 @@ func demo(_ u: Double) {
             label(title, 48, .heavy, at: CGPoint(x: 960, y: 930))
             label(sub, 32, .medium, rgb(0xcbd5e1), at: CGPoint(x: 960, y: 1000))
         }
+    }
+}
+
+func windowsDemo(_ u: Double) {
+    let mins = 40 + min(5, Int(u / 0.3))
+    let icon = windowsDesktop(trayText: "\(mins)", trayColor: mins >= 45 ? rgb(0xea580c) : rgb(0x16a34a),
+                              pulse: 1 - ease(prog(u, 0, 1.6)))
+    promptWindow(emoji: "🧍", title: "已经坐了 45 分钟啦",
+                 message: "去接杯水，顺便走两步\n建议活动 5 分钟",
+                 buttons: ["开始活动", "10 分钟后", "跳过"],
+                 appear: prog(u, 1.9, 2.4), vanish: prog(u, 3.5, 3.9), windows: true)
+
+    let menuRight = icon.maxX + 60, menuBottom = icon.minY - 16
+    let settings = windowsMenu(["🪑 已坐 45 分钟 · 10 分钟后提醒起身", "💧 今日喝水 3/8 杯 · 12 分钟后提醒", "-",
+                                "现在去活动 5 分钟", "我喝了一杯水", "重置久坐计时", "-",
+                                "暂停提醒 ›", "设置 ›", "-", "退出"],
+                               right: menuRight, bottom: menuBottom, width: 440, infoRows: 2,
+                               hover: u > 4.8 ? "设置 ›" : nil, appear: prog(u, 4.0, 4.3))
+    if u > 4.9 {
+        windowsMenu(["提醒时段：9:00–18:00 ›", "久坐提醒：45 分钟 ›", "喝水提醒：每 30 分钟 ›",
+                     "提示音：Windows Notify ›", "✓  开机自动启动"],
+                    right: menuRight - 440 + 4, top: settings.maxY + 8 - (16 + 5 * 40), width: 380,
+                    hover: u > 5.4 ? "提醒时段：9:00–18:00 ›" : nil, appear: prog(u, 4.9, 5.2))
+    }
+
+    platformPill("Windows 10 / 11", windows: true)
+    label("💻 Windows 也能用", 48, .heavy, at: CGPoint(x: 960, y: 930))
+    withAlpha(sceneAlpha(u, -1, 4.0)) {
+        label("托盘图标直接显示已坐分钟数，到点弹窗提醒", 32, .medium, rgb(0xcbd5e1), at: CGPoint(x: 960, y: 1000))
+    }
+    withAlpha(sceneAlpha(u, 4.0, 99)) {
+        label("同样的菜单和设置，提醒时段、提示音一样不少", 32, .medium, rgb(0xcbd5e1), at: CGPoint(x: 960, y: 1000))
     }
 }
 
@@ -335,9 +467,9 @@ func outro(_ u: Double) {
             appIcon(center: CGPoint(x: 960, y: 290), size: 190)
         }
     }
-    slideIn(prog(u, 0.4, 0.9)) { d in label("WorkHealth 1.1.0", 104, .heavy, at: CGPoint(x: 960, y: 500 + d)) }
+    slideIn(prog(u, 0.4, 0.9)) { d in label("WorkHealth 1.2.0", 104, .heavy, at: CGPoint(x: 960, y: 500 + d)) }
     slideIn(prog(u, 0.8, 1.3)) { d in
-        label("免费 · 开源 · 原生 Swift · 无第三方依赖", 42, .medium, rgb(0xcbd5e1), at: CGPoint(x: 960, y: 610 + d))
+        label("免费 · 开源 · 原生开发 · 无第三方依赖", 42, .medium, rgb(0xcbd5e1), at: CGPoint(x: 960, y: 610 + d))
     }
     slideIn(prog(u, 1.2, 1.7)) { d in
         let url = "github.com/vincentail/work_health"
@@ -347,12 +479,13 @@ func outro(_ u: Double) {
         label(url, 38, .semibold, dark, at: CGPoint(x: pill.midX, y: pill.midY))
     }
     slideIn(prog(u, 1.6, 2.1)) { d in
-        label("支持 Apple 芯片与 Intel · macOS 13+", 30, .regular, rgb(0x94a3b8), at: CGPoint(x: 960, y: 860 + d))
+        label("macOS 13+（Apple 芯片 / Intel） · Windows 10 / 11", 30, .regular, rgb(0x94a3b8), at: CGPoint(x: 960, y: 860 + d))
     }
 }
 
 let scenes: [(Double, Double, (Double) -> Void)] = [
-    (0, 4, intro), (4, 8.5, problem), (8.5, 23, demo), (23, 29, features), (29, duration, outro),
+    (0, 4, intro), (4, 8.5, problem), (8.5, 23, demo), (23, 29.5, windowsDemo), (29.5, 35.5, features),
+    (35.5, duration, outro),
 ]
 
 func drawFrame(_ t: Double) {
@@ -455,7 +588,7 @@ func synthMusic() -> ([Float], [Float]) {
     }
 
     // 提醒弹窗出现时的铃音
-    for start in [10.4, 14.0, 18.7, 29.0] {
+    for start in [10.4, 14.0, 18.7, 24.9, 35.5] {
         for (k, note) in [84, 91].enumerated() {
             let f = freq(note)
             add(&mixL, &mixR, at: start + Double(k) * 0.12, length: 2, gain: 0.1) { t in
@@ -532,7 +665,7 @@ let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
 if args.count >= 3 {
     let dir = URL(fileURLWithPath: args[2])
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    for t in [1.8, 6.5, 11.5, 13.2, 16, 21.5, 27.5, 32] {
+    for t in [1.8, 11.5, 16, 21.5, 25.6, 28.8, 33, 39] {
         let c = CGContext(data: nil, width: Int(W), height: Int(H), bitsPerComponent: 8, bytesPerRow: 0,
                           space: sRGB, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         render(into: c, t: t)

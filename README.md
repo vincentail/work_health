@@ -47,3 +47,7 @@ GitHub Actions（`.github/workflows/build.yml`）：
 - 推送到 `main`：自动构建并发布 Release，版本号 `1.0.<构建序号>`
 - 推送 `v*` 标签（如 `git tag v1.2.0 && git push origin v1.2.0`）：以标签为版本号发布 Release
 - Pull Request：只构建，不发布，产物可在 Actions 运行页面下载
+
+## 许可证
+
+[MIT](LICENSE)
