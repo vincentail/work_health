@@ -35,6 +35,19 @@ enum Prefs {
         get { int("snoozeMinutes", 10) }
         set { d.set(newValue, forKey: "snoozeMinutes") }
     }
+    /// 每天几点开始提醒（从 0 点起的分钟数），-1 表示不限
+    static var startMinute: Int {
+        get { int("startMinute", -1) }
+        set { d.set(newValue, forKey: "startMinute") }
+    }
+    /// 每天几点结束提醒（从 0 点起的分钟数），-1 表示不限
+    static var endMinute: Int {
+        get { int("endMinute", -1) }
+        set { d.set(newValue, forKey: "endMinute") }
+    }
+    static func clock(_ minute: Int) -> String {
+        String(format: "%d:%02d", minute / 60, minute % 60)
+    }
     static var waterGoal: Int {
         get { int("waterGoal", 8) }
         set { d.set(newValue, forKey: "waterGoal") }
@@ -280,6 +293,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             else { updateStatusButton(); return }
         }
 
+        // 不在每天的提醒时段内：不提醒，计时从开始时间算起
+        if breakEnd == nil && offHours {
+            resetSit()
+            lastWater = now
+            waterSnoozeUntil = nil
+            updateStatusButton()
+            return
+        }
+
         if let end = breakEnd {
             let left = end.timeIntervalSince(now)
             if left <= 0 { finishBreak() }
@@ -297,6 +319,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         updateStatusButton()
+    }
+
+    /// 当前时刻（从 0 点起的分钟数）
+    private var minuteOfDay: Int {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: Date())
+        return c.hour! * 60 + c.minute!
+    }
+
+    /// 当前是否不在每天的提醒时段内
+    private var offHours: Bool {
+        let m = minuteOfDay
+        return (Prefs.startMinute >= 0 && m < Prefs.startMinute)
+            || (Prefs.endMinute >= 0 && m >= Prefs.endMinute)
     }
 
     private var sitDue: Date {
@@ -409,6 +444,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if pausedUntil != nil {
             symbol = "pause.circle"
             text = ""
+        } else if offHours {
+            symbol = "moon.zzz"
+            text = ""
         } else {
             symbol = "figure.seated.side"
             text = " \(Int(Date().timeIntervalSince(sitStart) / 60))m"
@@ -437,12 +475,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if let until = pausedUntil {
             menu.addItem(info(until == .distantFuture ? "⏸ 已暂停提醒"
                               : "⏸ 已暂停，\(mins(until.timeIntervalSince(now))) 分钟后恢复"))
+        } else if offHours {
+            let ended = Prefs.endMinute >= 0 && minuteOfDay >= Prefs.endMinute
+            var s = ended ? "🌙 已过 \(Prefs.clock(Prefs.endMinute))，今天的提醒已结束" : "🌙 还没到开始时间"
+            if Prefs.startMinute >= 0 { s += " · 每天 \(Prefs.clock(Prefs.startMinute)) 开始" }
+            menu.addItem(info(s))
         } else {
             let sat = Int(now.timeIntervalSince(sitStart) / 60)
             menu.addItem(info("🪑 已坐 \(sat) 分钟 · \(mins(sitDue.timeIntervalSince(now))) 分钟后提醒起身"))
         }
         var water = "💧 今日喝水 \(Prefs.waterToday)/\(Prefs.waterGoal) 杯"
-        if Prefs.waterMinutes > 0 && breakEnd == nil && pausedUntil == nil {
+        if Prefs.waterMinutes > 0 && breakEnd == nil && pausedUntil == nil && !offHours {
             water += " · \(mins(waterDue.timeIntervalSince(now))) 分钟后提醒"
         }
         menu.addItem(info(water))
@@ -477,6 +520,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         let settings = NSMenu()
+        settings.addItem(hoursMenu())
         settings.addItem(choice("久坐提醒", [25, 30, 45, 60, 90], Prefs.sitMinutes, { "\($0) 分钟" }) {
             Prefs.sitMinutes = $0
         })
@@ -507,6 +551,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
+    }
+
+    private func hoursMenu() -> NSMenuItem {
+        let sub = NSMenu()
+        let clock = { (m: Int) in m < 0 ? "不限" : Prefs.clock(m) }
+        sub.addItem(choice("开始", [-1, 420, 450, 480, 510, 540, 570, 600, 630], Prefs.startMinute, clock) {
+            Prefs.startMinute = $0
+        })
+        sub.addItem(choice("结束", [-1, 1020, 1050, 1080, 1110, 1140, 1170, 1200, 1260, 1320], Prefs.endMinute, clock) {
+            Prefs.endMinute = $0
+        })
+        let (start, end) = (Prefs.startMinute, Prefs.endMinute)
+        let range = start < 0 && end < 0 ? "全天"
+            : "\(start < 0 ? "0:00" : Prefs.clock(start))–\(end < 0 ? "24:00" : Prefs.clock(end))"
+        return submenu("提醒时段：\(range)", sub)
     }
 
     private func soundMenu() -> NSMenuItem {
