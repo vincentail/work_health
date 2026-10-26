@@ -1,6 +1,6 @@
 # WorkHealth 健康提醒
 
-macOS 菜单栏小工具：久坐提醒起身活动、定时提醒喝水。原生 Swift 编写，无第三方依赖。
+久坐提醒起身活动、定时提醒喝水的小工具，支持 macOS（菜单栏，原生 Swift）和 Windows（系统托盘，C#），均无第三方依赖。
 
 ## 构建 / 安装
 
@@ -11,6 +11,12 @@ macOS 菜单栏小工具：久坐提醒起身活动、定时提醒喝水。原�
 ```
 
 需要 macOS 13+ 和 Xcode Command Line Tools（`xcode-select --install`）。
+
+Windows 版源码在 `windows/`，目标 .NET Framework 4.8（Windows 10/11 自带）：
+
+```bash
+dotnet build windows/WorkHealth.csproj -c Release -o build/win   # 生成 build/win/WorkHealth.exe
+```
 
 ## 功能
 
@@ -25,14 +31,19 @@ macOS 菜单栏小工具：久坐提醒起身活动、定时提醒喝水。原�
 
 ## 下载安装
 
-到 [Releases](https://github.com/vincentail/work_health/releases) 下载最新的 `WorkHealth-x.y.z.dmg`，打开后把 WorkHealth 拖到「应用程序」即可。通用二进制，支持 Apple 芯片和 Intel。
+到 [Releases](https://github.com/vincentail/work_health/releases) 下载最新版本。
 
-App 未经 Apple 公证，首次打开会被 Gatekeeper 拦截：右键 App 选择「打开」，或执行 `xattr -cr /Applications/WorkHealth.app`。
+macOS：下载 `WorkHealth-x.y.z.dmg`，打开后把 WorkHealth 拖到「应用程序」即可。通用二进制，支持 Apple 芯片和 Intel。
+
+Windows：下载 `WorkHealth-Windows-x.y.z.zip`，解压后双击 `WorkHealth.exe`，图标出现在任务栏右下角托盘（可能收在「^」里，可拖出来常驻），左键或右键点击打开菜单。托盘图标上直接显示已坐分钟数。exe 未签名，首次运行若被 SmartScreen 拦截，点「更多信息 → 仍要运行」。设置保存在 `%APPDATA%\WorkHealth\settings.ini`，开机启动写在注册表 `HKCU\...\Run`。
+
+macOS：App 未经 Apple 公证，首次打开会被 Gatekeeper 拦截：右键 App 选择「打开」，或执行 `xattr -cr /Applications/WorkHealth.app`。
 
 ## 自动构建
 
 GitHub Actions（`.github/workflows/build.yml`）：
 
+- 同时构建 macOS（dmg / zip）和 Windows（zip）
 - 推送到 `main`：自动构建并发布 Release，版本号 `1.0.<构建序号>`
 - 推送 `v*` 标签（如 `git tag v1.2.0 && git push origin v1.2.0`）：以标签为版本号发布 Release
 - Pull Request：只构建，不发布，产物可在 Actions 运行页面下载
