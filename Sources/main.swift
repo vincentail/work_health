@@ -62,6 +62,12 @@ enum Prefs {
         set { d.set(newValue, forKey: "soundName") }
     }
 
+    /// 提醒弹窗里的宠物
+    static var pet: Pet {
+        get { Pet(rawValue: d.string(forKey: "pet") ?? "") ?? .cat }
+        set { d.set(newValue.rawValue, forKey: "pet") }
+    }
+
     private static var todayKey: String {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
@@ -156,11 +162,215 @@ final class ClosureButton: NSButton {
     @objc private func fire() { handler?() }
 }
 
+// MARK: - 宠物动画
+
+enum Pet: String, CaseIterable {
+    case cat, dog, off = "none"
+    var label: String {
+        switch self {
+        case .cat: return "猫 🐱"
+        case .dog: return "狗 🐶"
+        case .off: return "关闭"
+        }
+    }
+}
+
+/// calm：呼吸、招手；active：蹦跳（活动中）；happy：眯眼开心（活动完成）
+enum PetMood { case calm, active, happy }
+
+/// 弹窗里的小猫/小狗，纯代码绘制，带呼吸、眨眼、摇尾巴、招手动画；旁边的气泡里显示提醒 emoji
+final class PetView: NSView {
+    static let size = NSSize(width: 170, height: 112)
+    private let pet: Pet
+    private let mood: PetMood
+    private let emoji: String
+    private let start = Date()
+    private var timer: Timer?
+
+    init(pet: Pet, mood: PetMood, emoji: String) {
+        self.pet = pet
+        self.mood = mood
+        self.emoji = emoji
+        super.init(frame: NSRect(origin: .zero, size: Self.size))
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.needsDisplay = true }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    deinit { timer?.invalidate() }
+
+    override var isFlipped: Bool { true }
+    override var intrinsicContentSize: NSSize { Self.size }
+
+    private func color(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
+        CGColor(srgbRed: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255,
+                blue: CGFloat(hex & 0xff) / 255, alpha: a)
+    }
+    private func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x, y: y) }
+    private func oval(_ g: CGContext, _ cx: CGFloat, _ cy: CGFloat, _ w: CGFloat, _ h: CGFloat, _ c: CGColor) {
+        g.setFillColor(c)
+        g.fillEllipse(in: CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h))
+    }
+    private func poly(_ g: CGContext, _ c: CGColor, _ points: CGPoint...) {
+        g.setFillColor(c)
+        g.beginPath()
+        g.addLines(between: points)
+        g.closePath()
+        g.fillPath()
+    }
+    private func stroke(_ g: CGContext, _ width: CGFloat, _ c: CGColor, _ build: (CGMutablePath) -> Void) {
+        let path = CGMutablePath()
+        build(path)
+        g.addPath(path)
+        g.setStrokeColor(c)
+        g.setLineWidth(width)
+        g.setLineCap(.round)
+        g.strokePath()
+    }
+    private func rotated(_ g: CGContext, _ angle: CGFloat, around p: CGPoint, _ body: () -> Void) {
+        g.saveGState()
+        g.translateBy(x: p.x, y: p.y)
+        g.rotate(by: angle)
+        g.translateBy(x: -p.x, y: -p.y)
+        body()
+        g.restoreGState()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let g = NSGraphicsContext.current?.cgContext else { return }
+        let t = Date().timeIntervalSince(start)
+        let cat = pet == .cat
+        let fur = color(cat ? 0xF6A04D : 0xE3B577), cream = color(0xFFF3E0)
+        let ink = color(0x3B2A20), pink = color(0xF28CA0), white = color(0xFFFFFF)
+
+        let hop: CGFloat
+        switch mood {
+        case .calm: hop = 1.5 + 1.5 * CGFloat(sin(t * 2.4))
+        case .active: hop = 9 * CGFloat(abs(sin(t * 5)))
+        case .happy: hop = 5 * CGFloat(abs(sin(t * 4)))
+        }
+        oval(g, 85, 106, 62 - hop * 2, 8, color(0x000000, 0.12))
+
+        g.saveGState()
+        g.translateBy(x: 25, y: -hop)
+
+        // 尾巴
+        let wag = CGFloat(sin(t * (cat ? 3 : mood == .calm ? 8 : 14))) * (cat ? 0.35 : 0.5)
+        rotated(g, wag, around: P(80, 88)) {
+            stroke(g, cat ? 9 : 8, fur) { p in
+                p.move(to: P(80, 88))
+                if cat { p.addQuadCurve(to: P(104, 50), control: P(112, 90)) }
+                else { p.addQuadCurve(to: P(102, 68), control: P(100, 88)) }
+            }
+        }
+
+        // 身体和脚
+        oval(g, 60, 82, 58, 40, fur)
+        oval(g, 60, 86, 30, 24, cream)
+        let waving = mood == .calm && t.truncatingRemainder(dividingBy: 4) < 1.6
+        oval(g, 46, 100, 16, 10, fur)
+        if !waving { oval(g, 74, 100, 16, 10, fur) }
+
+        // 猫耳朵（右耳偶尔抖一下）
+        if cat {
+            poly(g, fur, P(32, 36), P(36, 6), P(56, 24))
+            poly(g, pink, P(38, 30), P(39, 13), P(51, 24))
+            let twitch: CGFloat = t.truncatingRemainder(dividingBy: 5) < 0.2 ? 0.18 : 0
+            rotated(g, twitch, around: P(76, 30)) {
+                poly(g, fur, P(88, 36), P(84, 6), P(64, 24))
+                poly(g, pink, P(82, 30), P(81, 13), P(69, 24))
+            }
+        }
+
+        // 头
+        oval(g, 60, 48, 66, 56, fur)
+        if cat {
+            stroke(g, 3, color(0xD97F2E)) { p in
+                for x: CGFloat in [54, 60, 66] {
+                    p.move(to: P(x, x == 60 ? 22 : 24))
+                    p.addLine(to: P(x, 31))
+                }
+            }
+        } else {
+            // 狗：耷拉的耳朵会轻轻晃，嘴巴一圈浅色
+            let flap = CGFloat(sin(t * 3)) * 0.08
+            rotated(g, 0.35 + flap, around: P(30, 30)) { oval(g, 30, 46, 20, 38, color(0x9C6B3E)) }
+            rotated(g, -0.35 - flap, around: P(90, 30)) { oval(g, 90, 46, 20, 38, color(0x9C6B3E)) }
+            oval(g, 60, 60, 30, 20, cream)
+        }
+
+        // 眼睛：开心时眯成 ^ ^，平时每隔几秒眨一次
+        for x: CGFloat in [47, 73] {
+            let y: CGFloat = 48
+            if mood == .happy {
+                stroke(g, 2.5, ink) { p in
+                    p.move(to: P(x - 5, y + 2))
+                    p.addQuadCurve(to: P(x + 5, y + 2), control: P(x, y - 6))
+                }
+            } else if t.truncatingRemainder(dividingBy: 3.4) > 3.25 {
+                stroke(g, 2.5, ink) { p in
+                    p.move(to: P(x - 4, y))
+                    p.addLine(to: P(x + 4, y))
+                }
+            } else {
+                oval(g, x, y, 8, 10, ink)
+                oval(g, x + 1.5, y - 2.5, 3, 3, white)
+            }
+        }
+
+        // 腮红、鼻子、嘴
+        oval(g, 38, 60, 10, 6, color(0xF28CA0, 0.45))
+        oval(g, 82, 60, 10, 6, color(0xF28CA0, 0.45))
+        if cat { poly(g, pink, P(56, 55), P(64, 55), P(60, 59.5)) }
+        else { oval(g, 60, 56, 12, 8, ink) }
+        if !cat && mood != .calm { oval(g, 60, 67, 9, 11, color(0xF06A80)) }
+        stroke(g, 1.6, ink) { p in
+            p.move(to: P(60, 59))
+            p.addLine(to: P(60, 62))
+            p.move(to: P(54, 61))
+            p.addQuadCurve(to: P(60, 62), control: P(57, 66))
+            p.addQuadCurve(to: P(66, 61), control: P(63, 66))
+        }
+        if cat {
+            stroke(g, 1.2, color(0x3B2A20, 0.5)) { p in
+                for (a, b) in [(P(36, 58), P(22, 55)), (P(36, 62), P(22, 64)),
+                               (P(84, 58), P(98, 55)), (P(84, 62), P(98, 64))] {
+                    p.move(to: a)
+                    p.addLine(to: b)
+                }
+            }
+        }
+
+        // 招手
+        if waving {
+            let y = 64 + CGFloat(sin(t * 12)) * 4
+            oval(g, 95, y, 15, 15, fur)
+            oval(g, 95, y + 2, 7, 5, color(0xF28CA0, 0.8))
+        }
+        g.restoreGState()
+
+        // 气泡
+        let by = 4 + CGFloat(sin(t * 2)) * 2
+        let bubble = CGRect(x: 120, y: by, width: 46, height: 40)
+        g.setStrokeColor(color(0xCBD5E1))
+        g.setLineWidth(1)
+        for r in [bubble, CGRect(x: 124, y: by + 43, width: 7, height: 7)] {
+            g.addPath(CGPath(roundedRect: r, cornerWidth: min(14, r.width / 2), cornerHeight: min(14, r.height / 2),
+                             transform: nil))
+            g.setFillColor(white)
+            g.drawPath(using: .fillStroke)
+        }
+        let text = NSAttributedString(string: emoji, attributes: [.font: NSFont.systemFont(ofSize: 24)])
+        let sz = text.size()
+        text.draw(at: P(bubble.midX - sz.width / 2, bubble.midY - sz.height / 2))
+    }
+}
+
 /// 置顶、所有桌面可见的提醒弹窗
 final class PromptWindow: NSPanel {
     let messageLabel = NSTextField(wrappingLabelWithString: "")
 
-    init(emoji: String, title: String, message: String, buttons: [NSButton]) {
+    init(emoji: String, title: String, message: String, buttons: [NSButton], mood: PetMood = .calm) {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 420, height: 240),
                    styleMask: [.titled, .fullSizeContentView],
                    backing: .buffered, defer: false)
@@ -178,8 +388,14 @@ final class PromptWindow: NSPanel {
         bg.state = .active
         contentView = bg
 
-        let emojiLabel = NSTextField(labelWithString: emoji)
-        emojiLabel.font = .systemFont(ofSize: 52)
+        let top: NSView
+        if Prefs.pet == .off {
+            let emojiLabel = NSTextField(labelWithString: emoji)
+            emojiLabel.font = .systemFont(ofSize: 52)
+            top = emojiLabel
+        } else {
+            top = PetView(pet: Prefs.pet, mood: mood, emoji: emoji)
+        }
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .boldSystemFont(ofSize: 20)
         messageLabel.stringValue = message
@@ -192,7 +408,7 @@ final class PromptWindow: NSPanel {
         row.orientation = .horizontal
         row.spacing = 10
 
-        let stack = NSStackView(views: [emojiLabel, titleLabel, messageLabel, row])
+        let stack = NSStackView(views: [top, titleLabel, messageLabel, row])
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 10
@@ -417,7 +633,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func show(_ kind: PromptKind, emoji: String, title: String, message: String,
                       buttons: [NSButton], sound: Bool = true) {
         closePrompt()
-        let w = PromptWindow(emoji: emoji, title: title, message: message, buttons: buttons)
+        let mood: PetMood = kind == .onBreak ? .active : kind == .done ? .happy : .calm
+        let w = PromptWindow(emoji: emoji, title: title, message: message, buttons: buttons, mood: mood)
         prompt = w
         promptKind = kind
         NSApp.activate(ignoringOtherApps: true)
@@ -543,6 +760,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         })
         settings.addItem(.separator())
         settings.addItem(soundMenu())
+        let pets = NSMenu()
+        for pet in Pet.allCases {
+            pets.addItem(ActionItem(pet.label, checked: pet == Prefs.pet) { Prefs.pet = pet })
+        }
+        settings.addItem(submenu("弹窗宠物：\(Prefs.pet.label)", pets))
         settings.addItem(ActionItem("开机自动启动", checked: LoginItem.isEnabled) {
             LoginItem.setEnabled(!LoginItem.isEnabled)
         })
