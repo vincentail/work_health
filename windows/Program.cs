@@ -76,6 +76,9 @@ namespace WorkHealth
             set => Set("soundName", value);
         }
 
+        /// 提醒弹窗里的宠物：cat / dog / none
+        public static string Pet { get => d.TryGetValue("pet", out var v) ? v : "cat"; set => Set("pet", value); }
+
         public static string Clock(int minute) => $"{minute / 60}:{minute % 60:00}";
 
         static string TodayKey => "water-" + DateTime.Now.ToString("yyyy-MM-dd");
@@ -164,6 +167,213 @@ namespace WorkHealth
         }
     }
 
+    // MARK: - 宠物动画
+
+    /// Calm：呼吸、招手；Active：蹦跳（活动中）；Happy：眯眼开心（活动完成）
+    enum PetMood { Calm, Active, Happy }
+
+    /// 弹窗里的小猫/小狗，纯代码绘制，带呼吸、眨眼、摇尾巴、招手动画；旁边的气泡里显示提醒 emoji
+    sealed class PetControl : Control
+    {
+        readonly bool cat;
+        readonly PetMood mood;
+        readonly string emoji;
+        readonly float scale;
+        readonly DateTime start = DateTime.Now;
+        readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 33 };
+
+        public PetControl(string pet, PetMood mood, string emoji, float scale)
+        {
+            cat = pet == "cat";
+            this.mood = mood;
+            this.emoji = emoji;
+            this.scale = scale;
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+            Size = new Size((int)(170 * scale), (int)(112 * scale));
+            timer.Tick += (s, e) => Invalidate();
+            timer.Start();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) timer.Dispose();
+            base.Dispose(disposing);
+        }
+
+        static Color C(int rgb, int alpha = 255) => Color.FromArgb(alpha, (rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+        static PointF P(float x, float y) => new PointF(x, y);
+
+        static void Oval(Graphics g, float cx, float cy, float w, float h, Color c)
+        {
+            using (var b = new SolidBrush(c)) g.FillEllipse(b, cx - w / 2, cy - h / 2, w, h);
+        }
+
+        static void Poly(Graphics g, Color c, params PointF[] points)
+        {
+            using (var b = new SolidBrush(c)) g.FillPolygon(b, points);
+        }
+
+        static void Stroke(Graphics g, float width, Color c, Action<GraphicsPath> build)
+        {
+            using (var path = new GraphicsPath())
+            using (var pen = new Pen(c, width) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+            {
+                build(path);
+                g.DrawPath(pen, path);
+            }
+        }
+
+        /// 二次贝塞尔曲线（转成三次）
+        static void Quad(GraphicsPath p, PointF a, PointF c, PointF b) =>
+            p.AddBezier(a, P(a.X + 2f / 3 * (c.X - a.X), a.Y + 2f / 3 * (c.Y - a.Y)),
+                        P(b.X + 2f / 3 * (c.X - b.X), b.Y + 2f / 3 * (c.Y - b.Y)), b);
+
+        static void Rotated(Graphics g, double angle, PointF p, Action body)
+        {
+            var state = g.Save();
+            g.TranslateTransform(p.X, p.Y);
+            g.RotateTransform((float)(angle * 180 / Math.PI));
+            g.TranslateTransform(-p.X, -p.Y);
+            body();
+            g.Restore(state);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(BackColor);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.ScaleTransform(scale, scale);
+            var t = (DateTime.Now - start).TotalSeconds;
+            Color fur = C(cat ? 0xF6A04D : 0xE3B577), cream = C(0xFFF3E0), ink = C(0x3B2A20), pink = C(0xF28CA0);
+
+            float hop = mood == PetMood.Calm ? 1.5f + 1.5f * (float)Math.Sin(t * 2.4)
+                      : mood == PetMood.Active ? 9 * (float)Math.Abs(Math.Sin(t * 5))
+                      : 5 * (float)Math.Abs(Math.Sin(t * 4));
+            Oval(g, 85, 106, 62 - hop * 2, 8, C(0x000000, 31));
+
+            var outer = g.Save();
+            g.TranslateTransform(25, -hop);
+
+            // 尾巴
+            var wag = Math.Sin(t * (cat ? 3 : mood == PetMood.Calm ? 8 : 14)) * (cat ? 0.35 : 0.5);
+            Rotated(g, wag, P(80, 88), () => Stroke(g, cat ? 9 : 8, fur, p =>
+            {
+                if (cat) Quad(p, P(80, 88), P(112, 90), P(104, 50));
+                else Quad(p, P(80, 88), P(100, 88), P(102, 68));
+            }));
+
+            // 身体和脚
+            Oval(g, 60, 82, 58, 40, fur);
+            Oval(g, 60, 86, 30, 24, cream);
+            var waving = mood == PetMood.Calm && t % 4 < 1.6;
+            Oval(g, 46, 100, 16, 10, fur);
+            if (!waving) Oval(g, 74, 100, 16, 10, fur);
+
+            // 猫耳朵（右耳偶尔抖一下）
+            if (cat)
+            {
+                Poly(g, fur, P(32, 36), P(36, 6), P(56, 24));
+                Poly(g, pink, P(38, 30), P(39, 13), P(51, 24));
+                Rotated(g, t % 5 < 0.2 ? 0.18 : 0, P(76, 30), () =>
+                {
+                    Poly(g, fur, P(88, 36), P(84, 6), P(64, 24));
+                    Poly(g, pink, P(82, 30), P(81, 13), P(69, 24));
+                });
+            }
+
+            // 头
+            Oval(g, 60, 48, 66, 56, fur);
+            if (cat)
+            {
+                Stroke(g, 3, C(0xD97F2E), p =>
+                {
+                    foreach (var x in new float[] { 54, 60, 66 })
+                    {
+                        p.StartFigure();
+                        p.AddLine(x, x == 60 ? 22 : 24, x, 31);
+                    }
+                });
+            }
+            else
+            {
+                // 狗：耷拉的耳朵会轻轻晃，嘴巴一圈浅色
+                var flap = Math.Sin(t * 3) * 0.08;
+                Rotated(g, 0.35 + flap, P(30, 30), () => Oval(g, 30, 46, 20, 38, C(0x9C6B3E)));
+                Rotated(g, -0.35 - flap, P(90, 30), () => Oval(g, 90, 46, 20, 38, C(0x9C6B3E)));
+                Oval(g, 60, 60, 30, 20, cream);
+            }
+
+            // 眼睛：开心时眯成 ^ ^，平时每隔几秒眨一次
+            foreach (var x in new float[] { 47, 73 })
+            {
+                const float y = 48;
+                if (mood == PetMood.Happy)
+                    Stroke(g, 2.5f, ink, p => Quad(p, P(x - 5, y + 2), P(x, y - 6), P(x + 5, y + 2)));
+                else if (t % 3.4 > 3.25)
+                    Stroke(g, 2.5f, ink, p => p.AddLine(x - 4, y, x + 4, y));
+                else
+                {
+                    Oval(g, x, y, 8, 10, ink);
+                    Oval(g, x + 1.5f, y - 2.5f, 3, 3, Color.White);
+                }
+            }
+
+            // 腮红、鼻子、嘴
+            Oval(g, 38, 60, 10, 6, C(0xF28CA0, 115));
+            Oval(g, 82, 60, 10, 6, C(0xF28CA0, 115));
+            if (cat) Poly(g, pink, P(56, 55), P(64, 55), P(60, 59.5f));
+            else Oval(g, 60, 56, 12, 8, ink);
+            if (!cat && mood != PetMood.Calm) Oval(g, 60, 67, 9, 11, C(0xF06A80));
+            Stroke(g, 1.6f, ink, p =>
+            {
+                p.AddLine(60, 59, 60, 62);
+                p.StartFigure();
+                Quad(p, P(54, 61), P(57, 66), P(60, 62));
+                Quad(p, P(60, 62), P(63, 66), P(66, 61));
+            });
+            if (cat)
+            {
+                Stroke(g, 1.2f, C(0x3B2A20, 128), p =>
+                {
+                    p.StartFigure(); p.AddLine(36, 58, 22, 55);
+                    p.StartFigure(); p.AddLine(36, 62, 22, 64);
+                    p.StartFigure(); p.AddLine(84, 58, 98, 55);
+                    p.StartFigure(); p.AddLine(84, 62, 98, 64);
+                });
+            }
+
+            // 招手
+            if (waving)
+            {
+                var y = 64 + (float)Math.Sin(t * 12) * 4;
+                Oval(g, 95, y, 15, 15, fur);
+                Oval(g, 95, y + 2, 7, 5, C(0xF28CA0, 204));
+            }
+            g.Restore(outer);
+
+            // 气泡
+            var by = 4 + (float)Math.Sin(t * 2) * 2;
+            var bubble = new RectangleF(120, by, 46, 40);
+            using (var path = new GraphicsPath())
+            using (var border = new Pen(C(0xCBD5E1)))
+            {
+                const float r = 14;
+                path.AddArc(bubble.Left, bubble.Top, r * 2, r * 2, 180, 90);
+                path.AddArc(bubble.Right - r * 2, bubble.Top, r * 2, r * 2, 270, 90);
+                path.AddArc(bubble.Right - r * 2, bubble.Bottom - r * 2, r * 2, r * 2, 0, 90);
+                path.AddArc(bubble.Left, bubble.Bottom - r * 2, r * 2, r * 2, 90, 90);
+                path.CloseFigure();
+                path.AddEllipse(124, by + 43, 7, 7);
+                g.FillPath(Brushes.White, path);
+                g.DrawPath(border, path);
+            }
+            using (var font = new Font("Segoe UI Emoji", 20, GraphicsUnit.Pixel))
+            using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                g.DrawString(emoji, font, Brushes.Black, bubble, format);
+        }
+    }
+
     // MARK: - 提醒弹窗（置顶、居中）
 
     sealed class PromptWindow : Form
@@ -173,7 +383,7 @@ namespace WorkHealth
 
         int Px(float v) => (int)Math.Round(v * scale);
 
-        public PromptWindow(string emoji, string title, string message, params Button[] buttons)
+        public PromptWindow(string emoji, string title, string message, PetMood mood, params Button[] buttons)
         {
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
@@ -196,7 +406,16 @@ namespace WorkHealth
                 y += size.Height + Px(8);
                 return l;
             }
-            Add(emoji, new Font("Segoe UI Emoji", 34f), Color.FromArgb(15, 23, 42));
+            if (Prefs.Pet == "none")
+                Add(emoji, new Font("Segoe UI Emoji", 34f), Color.FromArgb(15, 23, 42));
+            else
+            {
+                var pet = new PetControl(Prefs.Pet, mood, emoji, scale) { BackColor = BackColor };
+                pet.Location = new Point((width - pet.Width) / 2, y);
+                pet.MouseDown += DragWindow;
+                Controls.Add(pet);
+                y += pet.Height + Px(6);
+            }
             Add(title, new Font("Microsoft YaHei UI", 15f, FontStyle.Bold), Color.FromArgb(15, 23, 42));
             // 留出两行高度，活动倒计时更新文字时不用重新排版
             MessageLabel = Add(message.Contains("\n") ? message : message + "\n", new Font("Microsoft YaHei UI", 10.5f),
@@ -473,7 +692,8 @@ namespace WorkHealth
         void Show(PromptKind kind, string emoji, string title, string message, Button[] buttons, bool sound)
         {
             ClosePrompt();
-            var w = new PromptWindow(emoji, title, message, buttons);
+            var mood = kind == PromptKind.OnBreak ? PetMood.Active : kind == PromptKind.Done ? PetMood.Happy : PetMood.Calm;
+            var w = new PromptWindow(emoji, title, message, mood, buttons);
             w.FormClosed += (s, e) =>
             {
                 if (prompt != w) return;
@@ -643,6 +863,7 @@ namespace WorkHealth
                 Choice("离开多久算休息", new[] { 3, 5, 10 }, Prefs.IdleResetMinutes, minutes, v => Prefs.IdleResetMinutes = v),
                 new ToolStripSeparator(),
                 SoundMenu(),
+                PetMenu(),
                 Item("开机自动启动", () => LoginItem.SetEnabled(!LoginItem.IsEnabled), LoginItem.IsEnabled)));
 
             menu.Items.Add(new ToolStripSeparator());
@@ -672,6 +893,14 @@ namespace WorkHealth
                 items.Add(Item($"自定义：{Sounds.Label(current)}", () => { Prefs.SoundOn = true; Sounds.Play(current); }, Prefs.SoundOn));
             items.Add(Item("选择音频文件…", PickSoundFile));
             return Submenu($"提示音：{(Prefs.SoundOn ? Sounds.Label(current) : "关闭")}", items.ToArray());
+        }
+
+        static ToolStripMenuItem PetMenu()
+        {
+            var pets = new[] { ("cat", "猫 🐱"), ("dog", "狗 🐶"), ("none", "关闭") };
+            var current = pets.FirstOrDefault(p => p.Item1 == Prefs.Pet).Item2 ?? pets[0].Item2;
+            return Submenu($"弹窗宠物：{current}",
+                           pets.Select(p => (ToolStripItem)Item(p.Item2, () => Prefs.Pet = p.Item1, p.Item1 == Prefs.Pet)).ToArray());
         }
 
         static void PickSoundFile()
